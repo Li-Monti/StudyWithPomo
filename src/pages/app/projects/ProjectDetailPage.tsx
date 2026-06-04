@@ -88,7 +88,7 @@ export function ProjectDetailPage() {
         .eq('project_id', id!)
         .eq('session_type', 'work')
         .order('started_at', { ascending: false })
-      return (data ?? []) as SessionWithTag[]
+      return (data ?? []) as unknown as SessionWithTag[]
     },
     enabled: !!id,
     staleTime: 0,

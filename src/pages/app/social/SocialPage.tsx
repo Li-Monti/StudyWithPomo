@@ -19,7 +19,6 @@ import {
   DialogClose,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { cn } from '@/lib/utils'
 import type { UserProfile } from '@/types/database'
 
 // Resultado del RPC get_my_groups (grupo + conteo en una sola query)
@@ -147,7 +146,7 @@ export function SocialPage() {
         `)
         .or(`requester_id.eq.${user!.id},addressee_id.eq.${user!.id}`)
         .eq('status', 'accepted')
-      return (data ?? []) as FriendshipWithProfiles[]
+      return (data ?? []) as unknown as FriendshipWithProfiles[]
     },
     enabled: !!user,
     staleTime: 30_000,
@@ -161,7 +160,7 @@ export function SocialPage() {
         .select('id, requester_id, requester:profiles!requester_id(id, username, avatar_url)')
         .eq('addressee_id', user!.id)
         .eq('status', 'pending')
-      return (data ?? []) as FriendRequestWithProfile[]
+      return (data ?? []) as unknown as FriendRequestWithProfile[]
     },
     enabled: !!user,
     staleTime: 0,

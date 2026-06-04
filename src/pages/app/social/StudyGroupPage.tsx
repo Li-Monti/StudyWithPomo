@@ -154,7 +154,7 @@ export function StudyGroupPage() {
         `)
         .or(`requester_id.eq.${user!.id},addressee_id.eq.${user!.id}`)
         .eq('status', 'accepted')
-      return (data ?? []) as FriendshipWithProfiles[]
+      return (data ?? []) as unknown as FriendshipWithProfiles[]
     },
     enabled: !!user,
     staleTime: 30_000,
