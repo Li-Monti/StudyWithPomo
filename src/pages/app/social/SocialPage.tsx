@@ -45,6 +45,8 @@ type FriendRequestWithProfile = {
   requester: Pick<UserProfile, 'id' | 'username' | 'avatar_url'> | null
 }
 
+type PublicProfile = Pick<UserProfile, 'id' | 'username' | 'avatar_url'>
+
 const PALETTE = [
   '#6366f1', '#8b5cf6', '#ec4899', '#f59e0b',
   '#10b981', '#3b82f6', '#ef4444', '#14b8a6',
@@ -79,7 +81,7 @@ export function SocialPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [searching, setSearching] = useState(false)
-  const [searchResults, setSearchResults] = useState<UserProfile[]>([])
+  const [searchResults, setSearchResults] = useState<PublicProfile[]>([])
   const [sentRequests, setSentRequests] = useState<Set<string>>(new Set())
 
   const [inviteMenuFor, setInviteMenuFor] = useState<string | null>(null)
@@ -91,21 +93,24 @@ export function SocialPage() {
 
   useEffect(() => {
     if (debouncedSearch.length < 2) {
-      setSearchResults([])
-      setSearching(false)
       return
     }
     let cancelled = false
-    setSearching(true)
+    queueMicrotask(() => {
+      if (!cancelled) setSearching(true)
+    })
     supabase
-      .from('profiles')
-      .select('id, username, avatar_url')
-      .ilike('username', `%${debouncedSearch}%`)
-      .neq('id', user?.id ?? '')
-      .limit(8)
-      .then(({ data }) => {
+      .rpc('search_profiles', { p_query: debouncedSearch })
+      .then(({ data, error }) => {
         if (cancelled) return
-        setSearchResults((data ?? []) as UserProfile[])
+        if (error) {
+          toast.error('No se pudo buscar usuarios.')
+          console.error('search_profiles failed:', error)
+          setSearchResults([])
+          setSearching(false)
+          return
+        }
+        setSearchResults((data ?? []) as PublicProfile[])
         setSearching(false)
       })
     return () => { cancelled = true }
@@ -182,29 +187,17 @@ export function SocialPage() {
     e.preventDefault()
     if (!groupName.trim() || !user) return
     setCreatingGroup(true)
-    // Generamos el UUID en cliente para evitar SELECT después del INSERT.
-    // El SELECT post-INSERT falla con RLS porque study_groups solo es visible
-    // para miembros, y el usuario aún no se agregó a study_group_members.
-    const groupId = crypto.randomUUID()
-    const { error: groupErr } = await supabase
-      .from('study_groups')
-      .insert({ id: groupId, name: groupName.trim(), created_by: user.id })
-    if (groupErr) {
+    const { error } = await supabase.rpc('create_study_group', { p_name: groupName.trim() })
+    if (error) {
       toast.error('No se pudo crear el grupo.')
+      console.error('create_study_group failed:', error)
       setCreatingGroup(false)
       return
     }
-    const { error: memberErr } = await supabase
-      .from('study_group_members')
-      .insert({ group_id: groupId, user_id: user.id })
-    if (memberErr) {
-      toast.error('Error al unirse al grupo recién creado.')
-    } else {
-      toast.success('Grupo creado.')
-      queryClient.invalidateQueries({ queryKey: ['myGroups'] })
-      setGroupName('')
-      setCreateGroupOpen(false)
-    }
+    toast.success('Grupo creado.')
+    queryClient.invalidateQueries({ queryKey: ['myGroups'] })
+    setGroupName('')
+    setCreateGroupOpen(false)
     setCreatingGroup(false)
   }
 

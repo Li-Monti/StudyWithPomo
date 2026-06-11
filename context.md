@@ -1,7 +1,16 @@
 # PomoPal — Contexto del Proyecto
 
 > Documentación técnica completa: arquitectura, lógica, flujos, estado actual y roadmap.
-> Actualizado: 2026-06-03
+> Actualizado: 2026-06-11
+
+## Actualización 2026-06-11
+
+- `profiles` dejó de ser públicamente legible: la búsqueda social usa RPC `search_profiles(p_query)` y solo devuelve `id`, `username`, `avatar_url`.
+- Los grupos son cerrados por invitación: la creación usa RPC `create_study_group(p_name)` y se eliminó el self-join directo por RLS.
+- `sessions` queda append-only para clientes: owner puede `SELECT` e `INSERT`, no `UPDATE`/`DELETE`.
+- `active_sessions` ahora guarda `total_ms`, `elapsed_ms` y `last_started_at` para medir tiempo efectivo sin contar pausas.
+- Al presionar `Detener` en una sesión de trabajo se muestra un diálogo y, si se confirma, se guarda una sesión parcial con el tiempo efectivo transcurrido.
+- Completar una sesión usa RPC `finish_active_work_session(true)`; detener manualmente usa `finish_active_work_session(false)` para guardar y limpiar de forma atómica.
 
 ---
 
@@ -97,6 +106,8 @@ src/
 - `003_social_features.sql` — RLS para invitar amigos a grupos + policy cross-read de sessions + RPC `get_group_leaderboard` ✅
 - `004_fix_rls_recursion.sql` — Función `auth_is_group_member(uuid)` SECURITY DEFINER; reemplaza policies recursivas en `study_group_members` y `study_groups` ✅
 - `005_get_my_groups.sql` — RPC `get_my_groups()` que retorna grupos + conteo de miembros en una sola query ✅
+- `006_fix_leaderboard_rpc.sql` — Ajusta `get_group_leaderboard` con `VOLATILE` y `SET search_path` ✅
+- `007_privacy_groups_timer_integrity.sql` — Perfiles privados con RPC de búsqueda, grupos cerrados, timer efectivo y `sessions` append-only ✅
 
 ### RPC Functions (SECURITY DEFINER)
 | Función | Descripción |
@@ -104,6 +115,9 @@ src/
 | `get_group_leaderboard(p_group_id uuid)` | Horas de trabajo por miembro desde `joined_at`. Valida membresía antes de devolver datos. |
 | `get_my_groups()` | Grupos del usuario actual con conteo de miembros. Elimina el waterfall de dos queries en SocialPage. |
 | `auth_is_group_member(p_group_id uuid)` | Helper interno. `true` si `auth.uid()` es miembro del grupo. Usado en policies RLS. |
+| `search_profiles(p_query text)` | Búsqueda social privada. Devuelve solo `id`, `username`, `avatar_url`, con mínimo 2 caracteres y límite 8. |
+| `create_study_group(p_name text)` | Crea grupo y membresía del creador de forma atómica. |
+| `finish_active_work_session(p_save_full bool)` | Finaliza sesión de trabajo activa de forma atómica. Completa guarda `total_ms`; stop manual guarda tiempo efectivo. |
 
 ### Tablas
 
@@ -193,6 +207,9 @@ src/
 | ends_at | timestamptz | Fin planificado |
 | session_type | text | `'work'` \| `'short_break'` \| `'long_break'` |
 | paused_remaining_ms | int *(002)* | ms restantes al pausar |
+| total_ms | int *(007)* | Duración planificada de la sesión |
+| elapsed_ms | int *(007)* | Tiempo efectivo acumulado antes de pausas |
+| last_started_at | timestamptz *(007)* | Inicio del tramo activo actual; null si está pausada |
 
 ---
 
@@ -320,10 +337,10 @@ Retorna: `{ status, sessionType, remaining, totalMs, pausedRemainingMs, start, s
 ### `useSession()`
 - `completeSession()` *(sin parámetros)*:
   1. Fetch `active_session` actual del usuario
-  2. Usa `active.started_at` (fuente de verdad DB, no parámetro stale)
-  3. Calcula `duration_seconds = endedAt - active.started_at`
-  4. INSERT en `sessions` usando `active.project_id`, `active.task_id`, `active.tag_id` (no del store)
-  5. DELETE de `active_sessions`
+  2. Usa RPC `finish_active_work_session(true)` para guardar y limpiar atómicamente
+  3. La duración completa se guarda desde `active_sessions.total_ms`
+  4. INSERT en `sessions` usa valores del DB (`project_id`, `task_id`, `tag_id`)
+  5. DELETE de `active_sessions` ocurre dentro de la RPC
   6. Invalida queries: `['sessions']`, `['stats']`, `['projectHours']`, `['todayProjectHours']`, `['projectStats', project_id]`, `['projectSessions', project_id]`
   7. Llama `setIdle()`
 

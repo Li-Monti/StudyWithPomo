@@ -13,6 +13,14 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import type { SessionType, Tag, Project } from '@/types/database'
 
@@ -27,6 +35,15 @@ function formatTime(ms: number) {
   const m = Math.floor(total / 60).toString().padStart(2, '0')
   const s = (total % 60).toString().padStart(2, '0')
   return `${m}:${s}`
+}
+
+function formatDuration(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes === 0) return `${seconds}s`
+  if (seconds === 0) return `${minutes}m`
+  return `${minutes}m ${seconds}s`
 }
 
 type ProjectForTimer = Pick<Project, 'id' | 'name' | 'color' | 'type' | 'goal_hours' | 'exam_date' | 'default_tag_id'>
@@ -67,7 +84,7 @@ function getDailyGoal(project: ProjectForTimer): number | null {
 
 export function TimerPage() {
   const { user } = useAuth()
-  const { status, sessionType, remaining, totalMs, pausedRemainingMs, start, startBreakPaused, pause, resume, stop, setSessionType } = useTimer()
+  const { status, sessionType, remaining, totalMs, pausedRemainingMs, start, startBreakPaused, pause, resume, stop, stopAndSaveWorkSession, setSessionType } = useTimer()
   const { completeSession } = useSession()
   const { activeTagId, setActiveTag, activeProjectId, setActiveProject } = useTimerStore()
 
@@ -84,6 +101,8 @@ export function TimerPage() {
   })
   const [showTagMenu, setShowTagMenu] = useState(false)
   const [showProjectMenu, setShowProjectMenu] = useState(false)
+  const [stopDialogOpen, setStopDialogOpen] = useState(false)
+  const [stopping, setStopping] = useState(false)
   // Persiste en localStorage para mantener el estado al cambiar de pestaña
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const stored = localStorage.getItem('timerSidebarOpen')
@@ -114,7 +133,7 @@ export function TimerPage() {
         else if (isPaused) void resume()
       }
       if (e.code === 'Escape' && (isRunning || isPaused) && !isBreak) {
-        void stop()
+        setStopDialogOpen(true)
       }
     }
     document.addEventListener('keydown', onKeyDown)
@@ -267,7 +286,8 @@ export function TimerPage() {
       const breakMin = isLong ? (config?.long_break_min ?? 15) : (config?.short_break_min ?? 5)
 
       ;(async () => {
-        await completeSession()
+        const saved = await completeSession()
+        if (!saved) return
         // Item 7: sonido al completar
         playCompletionSound()
         // Item 2: notificación de browser si el permiso está concedido
@@ -302,6 +322,13 @@ export function TimerPage() {
     void start(getWorkDurationMs())
   }
 
+  async function handleConfirmStop() {
+    setStopping(true)
+    const saved = await stopAndSaveWorkSession()
+    setStopping(false)
+    if (saved) setStopDialogOpen(false)
+  }
+
   // Pills solo interactivos cuando el timer está detenido (idle)
   const pillLocked = !isIdle
 
@@ -313,6 +340,7 @@ export function TimerPage() {
 
   const workMin = customWorkMin ?? config?.work_min ?? 25
   const ringRemainingMs = isIdle ? 0 : (isPaused ? (pausedRemainingMs ?? remaining) : remaining)
+  const stopSavedMs = Math.max(0, totalMs - ringRemainingMs)
 
   const selectedTag = tags.find((t: Tag) => t.id === activeTagId)
   const selectedProject = projects.find((p) => p.id === activeProjectId)
@@ -648,7 +676,7 @@ export function TimerPage() {
               <Button size="lg" onClick={() => void resume()} className="gap-2">
                 <Play className="h-5 w-5" /> Reanudar
               </Button>
-              <Button size="lg" variant="destructive" onClick={() => void stop()} className="gap-2">
+              <Button size="lg" variant="destructive" onClick={() => setStopDialogOpen(true)} className="gap-2">
                 <Square className="h-5 w-5" /> Detener
               </Button>
             </>
@@ -659,7 +687,7 @@ export function TimerPage() {
               <Button size="lg" variant="secondary" onClick={() => void pause()} className="gap-2">
                 <Pause className="h-5 w-5" /> Pausar
               </Button>
-              <Button size="lg" variant="destructive" onClick={() => void stop()} className="gap-2">
+              <Button size="lg" variant="destructive" onClick={() => setStopDialogOpen(true)} className="gap-2">
                 <Square className="h-5 w-5" /> Detener
               </Button>
             </>
@@ -706,6 +734,27 @@ export function TimerPage() {
       <div className="md:hidden w-full">
         {sidebarContent}
       </div>
+
+      <Dialog open={stopDialogOpen} onOpenChange={setStopDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Guardar progreso y detener?</DialogTitle>
+            <DialogDescription>
+              {stopSavedMs >= 1000
+                ? `Se guardará una sesión de ${formatDuration(stopSavedMs)} como tiempo trabajado.`
+                : 'Aún no hay tiempo suficiente para guardar. El timer se detendrá sin registrar sesión.'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStopDialogOpen(false)} disabled={stopping}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={() => void handleConfirmStop()} disabled={stopping}>
+              {stopping ? 'Guardando...' : stopSavedMs >= 1000 ? 'Guardar y detener' : 'Detener sin guardar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   )

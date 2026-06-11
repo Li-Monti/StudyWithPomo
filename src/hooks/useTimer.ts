@@ -1,9 +1,10 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useTimerStore } from '@/store/timerStore'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from './useAuth'
-import type { ActiveSession, SessionType } from '@/types/database'
+import type { ActiveSession } from '@/types/database'
 
 type WorkerEvent =
   | { type: 'tick'; remaining: number }
@@ -12,6 +13,7 @@ type WorkerEvent =
 export function useTimer() {
   const workerRef = useRef<Worker | null>(null)
   const { user } = useAuth()
+  const queryClient = useQueryClient()
   const {
     status, sessionType, endsAt, remaining, totalMs, pausedRemainingMs,
     activeProjectId, activeTaskId, activeTagId,
@@ -54,7 +56,7 @@ export function useTimer() {
 
         // Handle paused break
         if (session.paused_remaining_ms != null) {
-          const total = new Date(session.ends_at).getTime() - new Date(session.started_at).getTime()
+          const total = session.total_ms
           setTotalMs(total)
           setSessionType(session.session_type)
           setPaused(session.paused_remaining_ms)
@@ -63,13 +65,13 @@ export function useTimer() {
 
         const endsAt = new Date(session.ends_at).getTime()
         if (endsAt > Date.now()) {
-          const total = endsAt - new Date(session.started_at).getTime()
+          const total = session.total_ms
           setSessionType(session.session_type)
           setRunning(endsAt, session.id, total)
           workerRef.current?.postMessage({ type: 'start', endsAt })
         } else {
           if (session.session_type === 'work') {
-            void finishExpiredSession(session)
+            void finishExpiredSession()
           } else {
             // Expired break — just clear it and go idle
             void supabase.from('active_sessions').delete().eq('id', session.id)
@@ -111,6 +113,9 @@ export function useTimer() {
         ends_at: new Date(endsAt).toISOString(),
         session_type: sessionType,
         paused_remaining_ms: null,
+        total_ms: durationMs,
+        elapsed_ms: 0,
+        last_started_at: new Date(now).toISOString(),
       }, { onConflict: 'user_id' })
       .select()
       .single()
@@ -130,6 +135,7 @@ export function useTimer() {
   // Start a break session (shown paused until user clicks start)
   const startBreakPaused = useCallback(async (durationMs: number, type: 'short_break' | 'long_break') => {
     if (!user) return
+    const now = Date.now()
     const { data, error } = await supabase
       .from('active_sessions')
       .upsert({
@@ -137,10 +143,13 @@ export function useTimer() {
         project_id: null,
         task_id: null,
         tag_id: null,
-        started_at: new Date().toISOString(),
-        ends_at: new Date(Date.now() + durationMs).toISOString(),
+        started_at: new Date(now).toISOString(),
+        ends_at: new Date(now + durationMs).toISOString(),
         session_type: type,
         paused_remaining_ms: durationMs,
+        total_ms: durationMs,
+        elapsed_ms: 0,
+        last_started_at: null,
       }, { onConflict: 'user_id' })
       .select()
       .single()
@@ -154,20 +163,50 @@ export function useTimer() {
 
     const session = data as ActiveSession | null
     setSessionType(type)
-    if (session) useTimerStore.getState().setRunning(Date.now() + durationMs, session.id, durationMs)
+    if (session) useTimerStore.getState().setRunning(now + durationMs, session.id, durationMs)
     // Override back to paused (setRunning sets status to running)
     setPaused(durationMs)
   }, [user, setSessionType, setPaused, setIdle])
 
   const pause = useCallback(async () => {
-    workerRef.current?.postMessage({ type: 'stop' })
     try {
       if (user) {
-        await supabase
+        const { data: activeData, error: fetchError } = await supabase
           .from('active_sessions')
-          .update({ paused_remaining_ms: remaining })
+          .select('*')
           .eq('user_id', user.id)
+          .maybeSingle()
+
+        if (fetchError) throw fetchError
+        const active = activeData as ActiveSession | null
+        if (!active) return
+
+        const now = Date.now()
+        const activeEndsAt = new Date(active.ends_at).getTime()
+        const activeLastStartedAt = active.last_started_at
+          ? new Date(active.last_started_at).getTime()
+          : null
+        const elapsedMs = Math.min(
+          active.total_ms,
+          active.elapsed_ms + (activeLastStartedAt ? Math.max(0, now - activeLastStartedAt) : 0),
+        )
+        const pausedMs = Math.max(0, activeEndsAt - now)
+
+        const { error: updateError } = await supabase
+          .from('active_sessions')
+          .update({
+            paused_remaining_ms: pausedMs,
+            elapsed_ms: elapsedMs,
+            last_started_at: null,
+          })
+          .eq('user_id', user.id)
+        if (updateError) throw updateError
+
+        workerRef.current?.postMessage({ type: 'stop' })
+        setPaused(pausedMs)
+        return
       }
+      workerRef.current?.postMessage({ type: 'stop' })
       setPaused(remaining)
     } catch (err) {
       // Reiniciar worker si no se pudo guardar la pausa en DB
@@ -180,16 +219,19 @@ export function useTimer() {
   const resume = useCallback(async () => {
     const ms = pausedRemainingMs ?? remaining
     if (!ms || !user) return
-    const newEndsAt = Date.now() + ms
+    const now = Date.now()
+    const newEndsAt = now + ms
 
     try {
-      await supabase
+      const { error } = await supabase
         .from('active_sessions')
         .update({
           ends_at: new Date(newEndsAt).toISOString(),
           paused_remaining_ms: null,
+          last_started_at: new Date(now).toISOString(),
         })
         .eq('user_id', user.id)
+      if (error) throw error
 
       setResumed(newEndsAt)
       workerRef.current?.postMessage({ type: 'start', endsAt: newEndsAt })
@@ -200,11 +242,12 @@ export function useTimer() {
   }, [user, pausedRemainingMs, remaining, setResumed])
 
   const stop = useCallback(async () => {
-    workerRef.current?.postMessage({ type: 'stop' })
     try {
       if (user) {
-        await supabase.from('active_sessions').delete().eq('user_id', user.id)
+        const { error } = await supabase.from('active_sessions').delete().eq('user_id', user.id)
+        if (error) throw error
       }
+      workerRef.current?.postMessage({ type: 'stop' })
       setIdle()
     } catch (err) {
       toast.error('No se pudo detener la sesión.')
@@ -212,28 +255,35 @@ export function useTimer() {
     }
   }, [user, setIdle])
 
-  return { status, sessionType, remaining, totalMs, pausedRemainingMs, start, startBreakPaused, pause, resume, stop, setSessionType }
+  const stopAndSaveWorkSession = useCallback(async () => {
+    if (!user) return false
+    try {
+      const { error } = await supabase.rpc('finish_active_work_session', { p_save_full: false })
+      if (error) throw error
+
+      workerRef.current?.postMessage({ type: 'stop' })
+      queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+      queryClient.invalidateQueries({ queryKey: ['projectHours'] })
+      queryClient.invalidateQueries({ queryKey: ['todayProjectHours'] })
+      queryClient.invalidateQueries({ queryKey: ['projectSessions'] })
+      setIdle()
+      return true
+    } catch (err) {
+      toast.error('No se pudo guardar y detener la sesión.')
+      console.error('stopAndSaveWorkSession() failed:', err)
+      return false
+    }
+  }, [user, queryClient, setIdle])
+
+  return { status, sessionType, remaining, totalMs, pausedRemainingMs, start, startBreakPaused, pause, resume, stop, stopAndSaveWorkSession, setSessionType }
 }
 
 // BUG 4 fix: try-catch para evitar que errores silenciosos dejen la sesión atrapada en active_sessions
-async function finishExpiredSession(session: ActiveSession) {
+async function finishExpiredSession() {
   try {
-    const endedAt = new Date()
-    const startedAt = new Date(session.started_at)
-    const durationSeconds = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 1000))
-
-    await supabase.from('sessions').insert({
-      user_id: session.user_id,
-      project_id: session.project_id,
-      task_id: session.task_id,
-      tag_id: session.tag_id,
-      started_at: session.started_at,
-      ended_at: endedAt.toISOString(),
-      duration_seconds: durationSeconds,
-      session_type: session.session_type as SessionType,
-    })
-
-    await supabase.from('active_sessions').delete().eq('id', session.id)
+    const { error } = await supabase.rpc('finish_active_work_session', { p_save_full: true })
+    if (error) throw error
   } catch (err) {
     // Dejar la sesión en active_sessions; se reintentará en la próxima carga
     console.error('finishExpiredSession() failed, will retry on next load:', err)

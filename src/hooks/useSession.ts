@@ -12,43 +12,29 @@ export function useSession() {
   const { setIdle } = useTimerStore()
 
   const completeSession = useCallback(async () => {
-    if (!user) return
+    if (!user) return false
 
-    const { data } = await supabase
+    const { data: activeData, error: activeError } = await supabase
       .from('active_sessions')
       .select('*')
       .eq('user_id', user.id)
       .maybeSingle()
 
-    const active = data as ActiveSession | null
-    if (!active) return
-
-    // BUG 5 fix: usar ends_at como tiempo de fin canónico (más preciso que Date.now())
-    // Se cap a Date.now() para evitar duraciones negativas si se llama antes de tiempo
-    const scheduledEnd = new Date(active.ends_at).getTime()
-    const endedAt = new Date(Math.min(scheduledEnd, Date.now()))
-    const startedAt = new Date(active.started_at)
-    const durationSeconds = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 1000))
-
-    // BUG 3 fix: si el insert falla, mostrar error pero de todas formas limpiar
-    // para que el usuario no quede bloqueado en estado 'completed'
-    const { error: insertError } = await supabase.from('sessions').insert({
-      user_id: user.id,
-      project_id: active.project_id,
-      task_id: active.task_id,
-      tag_id: active.tag_id,
-      started_at: active.started_at,
-      ended_at: endedAt.toISOString(),
-      duration_seconds: durationSeconds,
-      session_type: active.session_type,
-    })
-
-    if (insertError) {
-      toast.error('No se pudo guardar la sesión. Revisá tu conexión.')
-      console.error('completeSession insert failed:', insertError)
+    if (activeError) {
+      toast.error('No se pudo leer la sesión activa.')
+      console.error('completeSession active fetch failed:', activeError)
+      return false
     }
 
-    await supabase.from('active_sessions').delete().eq('user_id', user.id)
+    const active = activeData as ActiveSession | null
+    if (!active) return false
+
+    const { error: finishError } = await supabase.rpc('finish_active_work_session', { p_save_full: true })
+    if (finishError) {
+      toast.error('No se pudo guardar la sesión. Revisá tu conexión.')
+      console.error('completeSession finish failed:', finishError)
+      return false
+    }
 
     queryClient.invalidateQueries({ queryKey: ['sessions'] })
     queryClient.invalidateQueries({ queryKey: ['stats'] })
@@ -59,6 +45,7 @@ export function useSession() {
     }
 
     setIdle()
+    return true
   }, [user, queryClient, setIdle])
 
   return { completeSession }

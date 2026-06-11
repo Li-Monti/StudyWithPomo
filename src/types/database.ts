@@ -59,6 +59,9 @@ export interface ActiveSession {
   ends_at: string
   session_type: SessionType
   paused_remaining_ms: number | null
+  total_ms: number
+  elapsed_ms: number
+  last_started_at: string | null
 }
 
 export interface Session {
@@ -99,5 +102,20 @@ export interface LeaderboardEntry {
   username: string
   avatar_url: string | null
   joined_at: string
-  total_seconds: number
+  total_seconds: number | string
+}
+
+export interface PublicProfile {
+  id: string
+  username: string
+  avatar_url: string | null
+}
+
+export interface MyGroupRow {
+  group_id: string
+  group_name: string
+  created_by: string
+  created_at: string
+  joined_at: string
+  member_count: number | string
 }
