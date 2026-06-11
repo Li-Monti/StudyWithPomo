@@ -45,6 +45,11 @@ type FriendRequestWithProfile = {
   requester: Pick<UserProfile, 'id' | 'username' | 'avatar_url'> | null
 }
 
+type SentFriendRequest = {
+  id: string
+  addressee_id: string
+}
+
 type PublicProfile = Pick<UserProfile, 'id' | 'username' | 'avatar_url'>
 
 const PALETTE = [
@@ -171,6 +176,20 @@ export function SocialPage() {
     staleTime: 0,
   })
 
+  const { data: sentFriendRequests = [] } = useQuery({
+    queryKey: ['sentFriendRequests', user?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('friendships')
+        .select('id, addressee_id')
+        .eq('requester_id', user!.id)
+        .eq('status', 'pending')
+      return (data ?? []) as SentFriendRequest[]
+    },
+    enabled: !!user,
+    staleTime: 0,
+  })
+
   const friendUsers = friends
     .map((f) => ({
       friendshipId: f.id,
@@ -182,6 +201,7 @@ export function SocialPage() {
   }[]
 
   const friendIds = new Set(friendUsers.map((f) => f.friend.id))
+  const sentRequestIds = new Set(sentFriendRequests.map((r) => r.addressee_id))
 
   async function handleCreateGroup(e: React.FormEvent) {
     e.preventDefault()
@@ -211,6 +231,7 @@ export function SocialPage() {
     } else {
       toast.success('Solicitud enviada.')
       setSentRequests((prev) => new Set(prev).add(targetId))
+      queryClient.invalidateQueries({ queryKey: ['sentFriendRequests'] })
     }
   }
 
@@ -241,9 +262,10 @@ export function SocialPage() {
   }
 
   async function handleInviteToGroup(groupId: string, friendId: string) {
-    const { error } = await supabase
-      .from('study_group_members')
-      .insert({ group_id: groupId, user_id: friendId })
+    const { error } = await supabase.rpc('invite_friend_to_group', {
+      p_group_id: groupId,
+      p_user_id: friendId,
+    })
     if (error) {
       toast.error('No se pudo invitar. ¿Ya es miembro?')
     } else {
@@ -397,7 +419,7 @@ export function SocialPage() {
                   <ul className="divide-y">
                     {searchResults.map((profile) => {
                       const isFriend = friendIds.has(profile.id)
-                      const isSent = sentRequests.has(profile.id)
+                      const isSent = sentRequests.has(profile.id) || sentRequestIds.has(profile.id)
                       return (
                         <li key={profile.id} className="flex items-center gap-3 px-4 py-3">
                           <Avatar>

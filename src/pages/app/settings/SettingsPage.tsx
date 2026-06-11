@@ -66,11 +66,14 @@ export function SettingsPage() {
   })
 
   useEffect(() => {
-    if (config) setForm({
-      work_min: config.work_min,
-      short_break_min: config.short_break_min,
-      long_break_min: config.long_break_min,
-      pomodoros_per_cycle: config.pomodoros_per_cycle,
+    if (!config) return
+    queueMicrotask(() => {
+      setForm({
+        work_min: config.work_min,
+        short_break_min: config.short_break_min,
+        long_break_min: config.long_break_min,
+        pomodoros_per_cycle: config.pomodoros_per_cycle,
+      })
     })
   }, [config])
 

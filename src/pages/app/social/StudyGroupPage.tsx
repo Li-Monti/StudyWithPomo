@@ -176,9 +176,10 @@ export function StudyGroupPage() {
   async function handleInvite(friendId: string) {
     if (!groupId) return
     setInvitingId(friendId)
-    const { error } = await supabase
-      .from('study_group_members')
-      .insert({ group_id: groupId, user_id: friendId })
+    const { error } = await supabase.rpc('invite_friend_to_group', {
+      p_group_id: groupId,
+      p_user_id: friendId,
+    })
     if (error) {
       toast.error('No se pudo invitar al usuario.')
     } else {

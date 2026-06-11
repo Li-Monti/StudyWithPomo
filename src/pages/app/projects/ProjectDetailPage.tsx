@@ -26,10 +26,10 @@ type SessionWithTag = Session & {
   tags: { name: string; color: string } | null
 }
 
-function calcHoursPerDay(project: Project, completedHours: number): { hoursPerDay: number; daysLeft: number } | null {
+function calcHoursPerDay(project: Project, completedHours: number, nowMs: number): { hoursPerDay: number; daysLeft: number } | null {
   if (project.type !== 'academic' || !project.exam_date || !project.goal_hours) return null
   const daysLeft = Math.ceil(
-    (new Date(project.exam_date).getTime() - Date.now()) / 86_400_000,
+    (new Date(project.exam_date).getTime() - nowMs) / 86_400_000,
   )
   if (daysLeft <= 0) return null
   const remaining = project.goal_hours - completedHours
@@ -50,6 +50,7 @@ export function ProjectDetailPage() {
   const [deletingTask, setDeletingTask] = useState(false)
   // Item 13: paginación del historial
   const [displayLimit, setDisplayLimit] = useState(HISTORY_PAGE)
+  const [pageLoadedAt] = useState(() => Date.now())
 
   const { data: project, isLoading: loadingProject } = useQuery({
     queryKey: ['project', id],
@@ -100,15 +101,15 @@ export function ProjectDetailPage() {
   )
 
   const sessionsThisWeek = useMemo(() => {
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const sevenDaysAgo = pageLoadedAt - 7 * 24 * 60 * 60 * 1000
     return allSessions.filter((s) => new Date(s.started_at).getTime() >= sevenDaysAgo).length
-  }, [allSessions])
+  }, [allSessions, pageLoadedAt])
 
   const sessions = useMemo(() => allSessions.slice(0, displayLimit), [allSessions, displayLimit])
 
   const academicBanner = useMemo(
-    () => (project ? calcHoursPerDay(project, totalHours) : null),
-    [project, totalHours],
+    () => (project ? calcHoursPerDay(project, totalHours, pageLoadedAt) : null),
+    [project, totalHours, pageLoadedAt],
   )
 
   const pendingTasks = useMemo(() => tasks.filter((t) => !t.completed_at), [tasks])

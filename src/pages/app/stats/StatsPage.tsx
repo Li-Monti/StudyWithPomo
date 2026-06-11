@@ -121,6 +121,7 @@ export function StatsPage() {
 
   // Lee el color primario real desde el DOM (las CSS vars son oklch, no hsl)
   const lineColor = useMemo(() => {
+    void resolvedTheme
     if (typeof window === 'undefined') return '#000'
     return getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()
   }, [resolvedTheme])

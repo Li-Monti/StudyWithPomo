@@ -108,6 +108,9 @@ src/
 - `005_get_my_groups.sql` — RPC `get_my_groups()` que retorna grupos + conteo de miembros en una sola query ✅
 - `006_fix_leaderboard_rpc.sql` — Ajusta `get_group_leaderboard` con `VOLATILE` y `SET search_path` ✅
 - `007_privacy_groups_timer_integrity.sql` — Perfiles privados con RPC de búsqueda, grupos cerrados, timer efectivo y `sessions` append-only ✅
+- `008_active_sessions_compat_hotfix.sql` — Compatibilidad para sesiones activas creadas por clientes previos a `007` ✅
+- `009_data_integrity_constraints.sql` — Triggers/constraints para ownership cruzado, friendships inversas y rangos válidos ✅
+- `010_invite_friend_to_group_rpc.sql` — RPC `invite_friend_to_group` para centralizar invitaciones a grupos ✅
 
 ### RPC Functions (SECURITY DEFINER)
 | Función | Descripción |
@@ -118,6 +121,7 @@ src/
 | `search_profiles(p_query text)` | Búsqueda social privada. Devuelve solo `id`, `username`, `avatar_url`, con mínimo 2 caracteres y límite 8. |
 | `create_study_group(p_name text)` | Crea grupo y membresía del creador de forma atómica. |
 | `finish_active_work_session(p_save_full bool)` | Finaliza sesión de trabajo activa de forma atómica. Completa guarda `total_ms`; stop manual guarda tiempo efectivo. |
+| `invite_friend_to_group(p_group_id uuid, p_user_id uuid)` | Invita a un amigo aceptado a un grupo si quien invita ya es miembro. |
 
 ### Tablas
 
