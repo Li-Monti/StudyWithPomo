@@ -44,6 +44,13 @@ function getPeriodStart(period: Period): Date {
   return new Date(now.getFullYear(), now.getMonth(), 1)
 }
 
+function localDateKey(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 function buildChartData(sessions: SessionWithRefs[], period: Period) {
   if (period === 'day') {
     // Agrupa sesiones por hora de inicio y muestra acumulado hora a hora
@@ -69,7 +76,7 @@ function buildChartData(sessions: SessionWithRefs[], period: Period) {
 
   const byDay: Record<string, number> = {}
   sessions.forEach((s) => {
-    const day = s.started_at.slice(0, 10)
+    const day = localDateKey(new Date(s.started_at))
     byDay[day] = (byDay[day] ?? 0) + s.duration_seconds / 3600
   })
 
@@ -81,7 +88,7 @@ function buildChartData(sessions: SessionWithRefs[], period: Period) {
   let cumulative = 0
 
   while (cursor <= today) {
-    const key = cursor.toISOString().slice(0, 10)
+    const key = localDateKey(cursor)
     cumulative += byDay[key] ?? 0
 
     const label =
@@ -152,7 +159,7 @@ export function StatsPage() {
         .eq('user_id', user!.id)
         .eq('session_type', 'work')
         .order('started_at', { ascending: false })
-      return (data ?? []).map((s) => s.started_at.slice(0, 10))
+      return (data ?? []).map((s) => localDateKey(new Date(s.started_at)))
     },
     enabled: !!user,
     staleTime: 0,
