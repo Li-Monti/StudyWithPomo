@@ -11,6 +11,7 @@
 - `active_sessions` ahora guarda `total_ms`, `elapsed_ms` y `last_started_at` para medir tiempo efectivo sin contar pausas.
 - Al presionar `Detener` en una sesión de trabajo se muestra un diálogo y, si se confirma, se guarda una sesión parcial con el tiempo efectivo transcurrido.
 - Completar una sesión usa RPC `finish_active_work_session(true)`; detener manualmente usa `finish_active_work_session(false)` para guardar y limpiar de forma atómica.
+- Las metas académicas diarias usan helper compartido `calcAcademicDailyGoal()` y calculan `(goal_hours - completedHours) / daysLeft` parseando `exam_date` como fecha local.
 
 ---
 
@@ -70,6 +71,7 @@ src/
 │   └── useSession.ts              # Completar y guardar sesiones
 ├── lib/
 │   ├── supabase.ts                # Cliente Supabase (sin generic type)
+│   ├── projectGoals.ts            # Helper compartido para metas académicas diarias
 │   └── utils.ts                   # cn() = clsx + tailwind-merge
 ├── pages/
 │   ├── auth/
@@ -422,7 +424,7 @@ Chips horizontales con `flex-wrap`.
 - Estado persiste en `localStorage.getItem('timerSidebarOpen')`
 - **Sección "Pendientes hoy"** (si hay proyectos con meta diaria sin cumplir):
   - Cards con el mismo diseño que ProjectsPage: dot de color, nombre, badge Académico/Hobby, banner "X hs/día necesarias" (amber), barra de progreso, "X hs completadas / Y hs meta"
-  - `getDailyGoal(project)`: academic → `goal_hours / daysLeft`; hobby → null (no aplica)
+  - `calcAcademicDailyGoal(project, completedHours, nowMs)`: academic → `(goal_hours - completedHours) / daysLeft`; hobby → null (no aplica)
   - Se actualiza al completar sesiones (query invalidada por useSession)
 - **Sección "Hoy"**: total horas en badge, lista de sesiones recientes con color de proyecto y duración en minutos
 
@@ -461,7 +463,7 @@ status === 'completed' + sessionType === 'work'
 
 **Cards:** dot de color, nombre, badge tipo, barra de progreso, banner "X hs/día necesarias" (amber) solo si academic + daysLeft > 0, menú 3 puntos (editar / archivar / restaurar)
 
-**Helper:** `calcHoursPerDay(project, completedHours)` → `(goal_hours - completedHours) / daysLeft`
+**Helper:** `calcAcademicDailyGoal(project, completedHours, nowMs)` → `(goal_hours - completedHours) / daysLeft`. Se comparte con TimerPage y ProjectDetailPage para evitar inconsistencias.
 
 ---
 

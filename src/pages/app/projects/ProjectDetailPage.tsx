@@ -18,23 +18,13 @@ import {
   DialogClose,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { calcAcademicDailyGoal } from '@/lib/projectGoals'
 import type { Project, Task, Session } from '@/types/database'
 
 const HISTORY_PAGE = 50
 
 type SessionWithTag = Session & {
   tags: { name: string; color: string } | null
-}
-
-function calcHoursPerDay(project: Project, completedHours: number, nowMs: number): { hoursPerDay: number; daysLeft: number } | null {
-  if (project.type !== 'academic' || !project.exam_date || !project.goal_hours) return null
-  const daysLeft = Math.ceil(
-    (new Date(project.exam_date).getTime() - nowMs) / 86_400_000,
-  )
-  if (daysLeft <= 0) return null
-  const remaining = project.goal_hours - completedHours
-  if (remaining <= 0) return null
-  return { hoursPerDay: remaining / daysLeft, daysLeft }
 }
 
 export function ProjectDetailPage() {
@@ -108,7 +98,11 @@ export function ProjectDetailPage() {
   const sessions = useMemo(() => allSessions.slice(0, displayLimit), [allSessions, displayLimit])
 
   const academicBanner = useMemo(
-    () => (project ? calcHoursPerDay(project, totalHours, pageLoadedAt) : null),
+    () => {
+      if (!project) return null
+      const dailyGoal = calcAcademicDailyGoal(project, totalHours, pageLoadedAt)
+      return dailyGoal && dailyGoal.remainingHours > 0 ? dailyGoal : null
+    },
     [project, totalHours, pageLoadedAt],
   )
 

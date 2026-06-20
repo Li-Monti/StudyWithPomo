@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { calcAcademicDailyGoal } from '@/lib/projectGoals'
 import type { Project, Tag } from '@/types/database'
 
 const DEFAULT_COLOR = '#6366f1'
@@ -48,16 +49,6 @@ const EMPTY_FORM: FormState = {
   default_tag_id: 'none',
 }
 
-function calcHoursPerDay(project: Project, completedHours: number): number | null {
-  if (project.type !== 'academic' || !project.exam_date || !project.goal_hours) return null
-  const daysLeft = Math.ceil(
-    (new Date(project.exam_date).getTime() - Date.now()) / 86_400_000,
-  )
-  if (daysLeft <= 0) return null
-  const remaining = project.goal_hours - completedHours
-  return remaining <= 0 ? 0 : remaining / daysLeft
-}
-
 export function ProjectsPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -71,6 +62,7 @@ export function ProjectsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [pageLoadedAt] = useState(() => Date.now())
 
   // Cierra el menú contextual al hacer click fuera de cualquier [data-menu-container]
   useEffect(() => {
@@ -265,7 +257,8 @@ export function ProjectsPage() {
               project.goal_hours != null
                 ? Math.min(100, (hours / project.goal_hours) * 100)
                 : null
-            const hoursPerDay = calcHoursPerDay(project, hours)
+            const dailyGoal = calcAcademicDailyGoal(project, hours, pageLoadedAt)
+            const hoursPerDay = dailyGoal?.hoursPerDay ?? null
             const isMenuOpen = openMenuId === project.id
 
             return (

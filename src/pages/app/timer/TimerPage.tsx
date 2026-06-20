@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { calcAcademicDailyGoal } from '@/lib/projectGoals'
 import type { SessionType, Tag, Project } from '@/types/database'
 
 const SESSION_LABELS: Record<SessionType, string> = {
@@ -70,18 +71,6 @@ function playCompletionSound() {
   }
 }
 
-function getDailyGoal(project: ProjectForTimer): number | null {
-  if (!project.goal_hours) return null
-  if (project.type === 'academic' && project.exam_date) {
-    const daysLeft = Math.ceil(
-      (new Date(project.exam_date).getTime() - Date.now()) / 86_400_000,
-    )
-    if (daysLeft <= 0) return null
-    return project.goal_hours / daysLeft
-  }
-  return null
-}
-
 export function TimerPage() {
   const { user } = useAuth()
   const { status, sessionType, remaining, totalMs, pausedRemainingMs, start, startBreakPaused, pause, resume, stop, stopAndSaveWorkSession, setSessionType } = useTimer()
@@ -103,6 +92,7 @@ export function TimerPage() {
   const [showProjectMenu, setShowProjectMenu] = useState(false)
   const [stopDialogOpen, setStopDialogOpen] = useState(false)
   const [stopping, setStopping] = useState(false)
+  const [pageLoadedAt] = useState(() => Date.now())
   // Persiste en localStorage para mantener el estado al cambiar de pestaña
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const stored = localStorage.getItem('timerSidebarOpen')
@@ -359,9 +349,9 @@ export function TimerPage() {
     .filter((p) => {
       if (!p.goal_hours) return false
       if (p.type === 'academic' && p.exam_date) {
-        const dailyGoal = getDailyGoal(p)
+        const dailyGoal = calcAcademicDailyGoal(p, projectHours[p.id] ?? 0, pageLoadedAt)
         if (dailyGoal === null) return false
-        return (todayProjectHours[p.id] ?? 0) < dailyGoal
+        return (todayProjectHours[p.id] ?? 0) < dailyGoal.hoursPerDay
       }
       if (p.type === 'hobby') {
         // Mostrar proyectos hobby cuya meta total aún no se alcanzó
@@ -371,7 +361,7 @@ export function TimerPage() {
     })
     .map((p) => ({
       ...p,
-      dailyGoal: getDailyGoal(p),  // null para hobby (no tiene meta diaria)
+      dailyGoal: calcAcademicDailyGoal(p, projectHours[p.id] ?? 0, pageLoadedAt)?.hoursPerDay ?? null,
       todayHours: todayProjectHours[p.id] ?? 0,
     }))
 
@@ -425,7 +415,7 @@ export function TimerPage() {
               const progress = p.goal_hours
                 ? Math.min(100, (totalHours / p.goal_hours) * 100)
                 : null
-              const hoursPerDay = getDailyGoal(p)
+              const hoursPerDay = p.dailyGoal
 
               return (
                 <div key={p.id} className="rounded-xl border bg-card p-4 shadow-sm">
